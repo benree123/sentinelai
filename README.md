@@ -35,6 +35,10 @@ Screenshots are illustrative captures of local fictional data and may precede sm
 
 Run **Account takeover** as admin, manager or analyst. Eleven fictional events arrive over several seconds and produce a 95/100 critical incident plus a separate unknown-device signal. Inspect evidence and risk, prepare a labelled briefing, ask the copilot, then investigate/contain/resolve with a recorded reason. Containment is a workflow decision, not an external action.
 
+## Free online demo deployment
+
+See [Render + Neon setup](docs/FREE_DEPLOYMENT.md). The free-plan configuration is included in render.yaml. A live deployment has not yet been verified.
+
 ## Quick start
 
 Prerequisites: Python 3.12 and Node 22.12+. From the repository root:
@@ -110,7 +114,7 @@ No successful LLM inference is claimed in this environment. Prompt grounding doe
 
 ## Validation and limitations
 
-See [engineering report](docs/ENGINEERING_REPORT.md) for exact commands/results and [initial audit](docs/AUDIT.md) for findings. The standard `npm run build` passed on GitHub’s Linux runner and inside the Docker build. A restricted Windows host still reports `spawn EPERM`; the successful CI build confirms the standard command works without an alternate bundler.
+See [engineering report](docs/ENGINEERING_REPORT.md) for exact commands/results and [initial audit](docs/AUDIT.md) for findings. The standard `npm run build` passed on GitHubï¿½s Linux runner and inside the Docker build. A restricted Windows host still reports `spawn EPERM`; the successful CI build confirms the standard command works without an alternate bundler.
 
 The GitHub Actions definition checks SQLite/PostgreSQL, frontend tests/build, dependency advisories and Docker. The complete workflow passed in private pre-release verification: 67 tests on SQLite, 67 on PostgreSQL, three frontend tests, standard Vite build, dependency audits and Docker/PostgreSQL runtime smoke. The badge above shows the current public repository workflow. See [release verification](docs/RELEASE_VERIFICATION.md). Docker remains unavailable on the original Windows host. Tests use fictional disposable accounts and a dedicated `sentinel_test` database when `TEST_DATABASE_URL` is set; the PostgreSQL test schema is dropped between cases.
 

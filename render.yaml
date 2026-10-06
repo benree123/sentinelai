@@ -1,0 +1,25 @@
+# One process; PostgreSQL lives in Neon, outside Render's ephemeral disk.
+services:
+  - type: web
+    name: sentinelai-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "5090"
+      - key: SENTINEL_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: SENTINEL_JWT_KEY
+        sync: false
+      - key: SENTINEL_BOOTSTRAP_PASSWORD
+        sync: false
+      - key: SENTINEL_PUBLIC_URL
+        sync: false
