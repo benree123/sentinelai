@@ -1,6 +1,6 @@
 # Free portfolio deployment: Render + Neon
 
-Status: configuration prepared; a live URL is not yet verified.
+Status: live portfolio demo at https://sentinelai-demo.onrender.com (October 5, 2026). Render Docker deployment, Neon PostgreSQL connectivity, secure sign-in, live simulations, Critical 95/100 evidence briefing, containment/resolution, and persisted records after page reload were checked in the browser. Service-restart persistence has not been separately tested.
 
 One Render Docker service serves React, FastAPI, and authenticated WebSockets
 from the same HTTPS origin. Neon persists PostgreSQL records independently of

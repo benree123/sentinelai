@@ -4,7 +4,7 @@
 
 An evidence-first Security Operations and Incident Response portfolio application built with **React, TypeScript, FastAPI, SQLAlchemy and SQL**. SentinelAI turns fictional security events into explainable incidents and gives analysts a single workspace to investigate, document decisions and track resolution.
 
-This is a local demonstration platform. It never scans external targets or executes containment commands. The release source is available on GitHub; this is not a hosted production deployment.
+This is a portfolio demonstration with fictional telemetry. It never scans external targets or executes containment commands. [Open the live demo](https://sentinelai-demo.onrender.com). Hosted on Render Free with Neon PostgreSQL; this is not a production security service.
 
 ## Capabilities
 
@@ -12,7 +12,7 @@ This is a local demonstration platform. It never scans external targets or execu
 
 **Optional / requires configuration:** local Ollama structured analysis, SMTP recovery/invitations and verified registration, PostgreSQL and HTTPS production settings. PostgreSQL tests and the Docker/PostgreSQL runtime have been verified in GitHub Actions; actual model inference and mail delivery remain unverified.
 
-**Planned:** OAuth, MFA, reviewed database migrations, durable outbox/pub-sub, distributed rate limits, external threat intelligence, retention policies and cloud deployment. Redis and AWS are not connected.
+**Planned:** OAuth, MFA, reviewed database migrations, durable outbox/pub-sub, distributed rate limits, external threat intelligence, retention policies. Redis and external threat feeds are not connected.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Run **Account takeover** as admin, manager or analyst. Eleven fictional events a
 
 ## Free online demo deployment
 
-See [Render + Neon setup](docs/FREE_DEPLOYMENT.md). The free-plan configuration is included in render.yaml. A live deployment has not yet been verified.
+See [Render + Neon setup](docs/FREE_DEPLOYMENT.md). The free-plan configuration is included in render.yaml. [Live demo](https://sentinelai-demo.onrender.com): create a viewer account to explore fictional incidents and evidence. Analyst simulation and response actions require authorized access. Free hosting may take 50 seconds or more to wake up.
 
 ## Quick start
 
