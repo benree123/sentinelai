@@ -1,0 +1,15 @@
+{
+  "name": "sentinelai", "private": true,
+  "scripts": {
+    "install:frontend": "npm ci --prefix frontend",
+    "install:backend": "python -m pip install -r backend/requirements.txt",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 5090",
+    "typecheck": "npm run typecheck --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "test:frontend": "npm test --prefix frontend",
+    "test:backend": "python -m pytest",
+    "test": "npm run test:frontend && npm run test:backend",
+    "docker:up": "docker compose up --build -d"
+  }
+}

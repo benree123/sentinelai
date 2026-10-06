@@ -1,0 +1,10 @@
+# HTTPS reverse proxy must terminate TLS and forward trusted Host/proto headers.
+# Start with: docker compose -f compose.yaml -f compose.production.yaml up --build -d
+services:
+  app:
+    environment:
+      SENTINEL_ENV: production
+      COOKIE_SECURE: "true"
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-true}
+      SENTINEL_JWT_KEY: ${SENTINEL_JWT_KEY:?Set a random hexadecimal signing key}
+      SENTINEL_PUBLIC_URL: ${SENTINEL_PUBLIC_URL:?Set an HTTPS public URL}

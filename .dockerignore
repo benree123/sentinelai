@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/data
+.env
+*.zip
+
+.env.*
+!.env.example
+**/pytest-cache-files-*/

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.db
+*.db-*
+.env
+data/
+*.log
+pytest-cache-files-*/
+
+.env.*
+!.env.example
+**/pytest-cache-files-*/

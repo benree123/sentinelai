@@ -1,0 +1,81 @@
+name: Verify SentinelAI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable-ci-password
+          POSTGRES_DB: sentinel_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sentinel_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - run: pip install pip-audit
+      - run: pip-audit -r backend/requirements.txt
+      - name: Test SQLite
+        if: matrix.database == 'sqlite'
+        working-directory: backend
+        run: python -m pytest tests -q
+      - name: Test PostgreSQL
+        if: matrix.database == 'postgres'
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:disposable-ci-password@localhost:5432/sentinel_test
+        run: python -m pytest tests -q
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npm test
+      - working-directory: frontend
+        run: npm run build
+      - working-directory: frontend
+        run: npm audit --audit-level=high
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start disposable PostgreSQL stack
+        env:
+          POSTGRES_PASSWORD: disposable_ci_postgres_2026
+          SENTINEL_BOOTSTRAP_PASSWORD: Disposable-CI-bootstrap-2026
+        run: docker compose up --build --wait --wait-timeout 180
+      - name: Verify running image against PostgreSQL
+        env:
+          SENTINEL_BOOTSTRAP_PASSWORD: Disposable-CI-bootstrap-2026
+        run: python3 scripts/container_smoke.py
+      - name: Show stack logs on failure
+        if: failure()
+        env:
+          POSTGRES_PASSWORD: disposable_ci_postgres_2026
+          SENTINEL_BOOTSTRAP_PASSWORD: Disposable-CI-bootstrap-2026
+        run: docker compose logs --no-color
+      - name: Stop disposable stack
+        if: always()
+        env:
+          POSTGRES_PASSWORD: disposable_ci_postgres_2026
+          SENTINEL_BOOTSTRAP_PASSWORD: Disposable-CI-bootstrap-2026
+        run: docker compose down
