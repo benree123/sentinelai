@@ -1,4 +1,4 @@
-export type User = {username:string; role:'admin'|'manager'|'analyst'|'viewer';email?:string;display_name?:string};
+export type User = {username:string; role:'admin'|'manager'|'analyst'|'viewer';email?:string;display_name?:string;guest?:boolean};
 export type SecurityEvent = {simulated?:boolean;id:number; external_id:string; kind:string; service:string; actor:string; source_ip:string; message:string; occurred_at:string};
 export type Incident = {id:number; reference:string; title:string; rule:string; severity:string; score:number; status:string; assigned_to:string|null; version:number; explanation:string; evidence_count:number; created_at:string; updated_at:string; evidence?:SecurityEvent[]; notes?:{id:number;author:string;body:string;created_at:string}[]};
 export type Dashboard = {events:number;events_today:number; active_incidents:number; critical:number; investigating:number; severity:Record<string,number>; trend:number[]; rules:{id:string;kind:string;score:number;threshold:number;window_minutes:number}[]};

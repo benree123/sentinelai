@@ -37,7 +37,7 @@ Run **Account takeover** as admin, manager or analyst. Eleven fictional events a
 
 ## Free online demo deployment
 
-See [Render + Neon setup](docs/FREE_DEPLOYMENT.md). The free-plan configuration is included in render.yaml. [Live demo](https://sentinelai-demo.onrender.com): create a viewer account to explore fictional incidents and evidence. Analyst simulation and response actions require authorized access. Free hosting may take 50 seconds or more to wake up.
+See [Render + Neon setup](docs/FREE_DEPLOYMENT.md). The free-plan configuration is included in render.yaml. [Live demo](https://sentinelai-demo.onrender.com): select **Try the demo** to investigate sample incidents and run simulations with a restricted guest account. All data is fictional, shared and reset regularly. Free hosting may take 50 seconds or more to wake up.
 
 ## Quick start
 
