@@ -5,12 +5,13 @@ export type Dashboard = {events:number;events_today:number; active_incidents:num
 export type Briefing = {mode:string;model:string|null;summary:string;hypotheses:string[];next_steps:string[];evidence_ids:number[];limitations:string};
 export type AuditEntry = {id:number;actor:string;action:string;target:string;detail:string;created_at:string};
 // Coordinate rotating refresh credentials across parallel dashboard requests.
+const UNAVAILABLE='SentinelAI is waking up or temporarily unavailable. Please try again in a minute.';
 let refreshInFlight:Promise<boolean>|null=null;
 let authGeneration=0;
 function refreshSession(){
  if(!refreshInFlight){
   refreshInFlight=fetch('/api/auth/refresh',{method:'POST',credentials:'same-origin',headers:{'X-Sentinel-Request':'1'}})
-   .then(response=>{if(response.ok){authGeneration++;return true}return false})
+   .then(response=>{if(response.ok){authGeneration++;return true}if(response.status>=500)throw new Error(UNAVAILABLE);return false},()=>{throw new Error(UNAVAILABLE)})
    .finally(()=>{refreshInFlight=null});
  }
  return refreshInFlight;
@@ -18,16 +19,22 @@ function refreshSession(){
 export async function api<T>(path:string, options:RequestInit={}):Promise<T> {
  const generationAtStart=authGeneration;
  const send=()=>fetch('/api'+path,{...options,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Sentinel-Request':'1',...options.headers}});
- let response=await send();
+ let response:Response;
+ try{response=await send()}catch{throw new Error(UNAVAILABLE)}
  if(response.status===401 && (!path.startsWith('/auth/') || ['/auth/me','/auth/logout','/auth/sessions'].some(p=>path.startsWith(p)))){
   // A late response from the old token can arrive after another request refreshed.
   const refreshed=authGeneration!==generationAtStart || await refreshSession();
-  if(refreshed)response=await send();
+  if(refreshed){try{response=await send()}catch{throw new Error(UNAVAILABLE)}}
   else window.dispatchEvent(new Event('sentinel:expired'));
  }
- const data=await response.json();
- if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'Please check the submitted values.');
+ // Hosting proxies can answer with HTML while the service wakes up or restarts.
+ let data:any;
+ try{data=await response.json()}catch{throw new Error(UNAVAILABLE)}
+ if(!response.ok){
+  const validation=Array.isArray(data?.detail)?String(data.detail[0]?.msg??'').replace(/^Value error, /,''):'';
+  throw new Error(typeof data?.detail==='string'?data.detail:validation||'Please check the submitted values.');
+ }
  return data as T;
 }
-export function relativeDate(iso:string){const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/60000));return minutes<1?'Just now':minutes<60?`${minutes}m ago`:`${Math.floor(minutes/60)}h ago`}
+export function relativeDate(iso:string){const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(iso))/60000));return minutes<1?'Just now':minutes<60?`${minutes}m ago`:minutes<1440?`${Math.floor(minutes/60)}h ago`:`${Math.floor(minutes/1440)}d ago`}
 export function label(value:string){return value.replaceAll('_',' ')}

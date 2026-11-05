@@ -17,7 +17,7 @@ from .security import hash_password, verify_password, token_hash, jwt_encode, jw
 from .detection import detect, RULES
 from .analysis import analyze
 
-from .config import validate_configuration, secure_cookies
+from .config import validate_configuration, secure_cookies, origin_allowed, production
 
 log = logging.getLogger('sentinel')
 COOKIE = 'sentinel_session'
@@ -148,6 +148,8 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'no-referrer'
+        if production():
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000'
         response.headers['Cache-Control'] = 'no-store' if request.url.path.startswith('/api') else 'no-cache'
         if not request.url.path.startswith(('/docs', '/redoc')):
             response.headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
@@ -186,8 +188,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             if request.method not in ('GET', 'HEAD'):
                 if request.headers.get('X-Sentinel-Request') != '1':
                     raise HTTPException(403, 'Required same-origin request header is missing')
-                origin = request.headers.get('origin')
-                if origin and origin != str(request.base_url).rstrip('/'):
+                if not origin_allowed(request.headers.get('origin'), str(request.base_url)):
                     raise HTTPException(403, 'Cross-origin writes are not allowed')
                 with rate_lock:
                     now = time.monotonic()
@@ -250,8 +251,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
     def login(payload: LoginInput, request: Request, response: Response, db=Depends(db_dependency)):
         if request.headers.get('X-Sentinel-Request') != '1':
             raise HTTPException(403, 'Required same-origin request header is missing')
-        origin = request.headers.get('origin')
-        if origin and origin != str(request.base_url).rstrip('/'):
+        if not origin_allowed(request.headers.get('origin'), str(request.base_url)):
             raise HTTPException(403, 'Cross-origin login is not allowed')
         address = request.client.host if request.client else 'unknown'
         with rate_lock:
@@ -259,7 +259,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             attempts = [t for t in login_attempts.get(address, []) if now-t < 60]
             if len(attempts) >= 5:
                 raise HTTPException(429, 'Too many login attempts; wait one minute')
-            login_attempts[address] = attempts + [now]
+            login_attempts[address] = attempts
         identifier = payload.username.strip().lower()
         profile = db.scalar(select(UserProfile).where(UserProfile.email == identifier))
         user = db.get(User, profile.user_id) if profile else db.scalar(select(User).where(User.username == identifier))
@@ -276,6 +276,8 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             with rate_lock:
                 failed_at=time.monotonic()
                 account_failures[account_key]=[t for t in account_failures.get(account_key,[]) if failed_at-t<900]+[failed_at]
+                # Only failures count: visitors may share one address behind the host's proxy.
+                login_attempts[address]=[t for t in login_attempts.get(address,[]) if failed_at-t<60]+[failed_at]
             raise HTTPException(401, 'Username or password is incorrect')
         with rate_lock:
             account_failures.pop(account_key,None)
@@ -452,7 +454,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
         origin = socket.headers.get('origin')
         expected = ('https://' if socket.url.scheme=='wss' else 'http://') + socket.headers.get('host','')
         token = socket.cookies.get(COOKIE)
-        if not session_user(token) or (origin and origin != expected):
+        if not session_user(token) or not origin_allowed(origin, expected):
             await socket.close(code=1008)
             return
         await socket.accept()
@@ -479,7 +481,12 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
     frontend = Path(frontend_dir or Path(__file__).resolve().parents[2]/'frontend/dist')
     from fastapi.responses import FileResponse
     @app.get('/admin/users', include_in_schema=False)
-    def admin_page(user=Depends(permit('admin'))):
+    def admin_page(request: Request):
+        # The page shell holds no data. Signed-out or expired visitors get the app so it
+        # can refresh or show sign-in; every /api/admin route still enforces the admin role.
+        user = session_user(request.cookies.get(COOKIE))
+        if user and user['role'] != 'admin':
+            raise HTTPException(403, 'Your role does not allow this action')
         if not (frontend/'index.html').exists():
             raise HTTPException(503,'Frontend build is unavailable; build the frontend first')
         return FileResponse(frontend/'index.html')
