@@ -11,7 +11,7 @@ from .models import User, UserProfile, SessionToken, AccountToken, Incident, Eve
 from .security import hash_password, token_hash, jwt_encode, jwt_decode
 from .analysis import analyze
 from typing import Literal
-from .config import secure_cookies, require_verification
+from .config import secure_cookies, require_verification, origin_allowed, production
 
 class EmailInput(BaseModel):
     email: str = Field(min_length=5, max_length=254)
@@ -72,7 +72,7 @@ def send_account_mail(email, token, purpose):
 
 def install_workspace(app, sessions, engine, permit, current_user, db_dependency, broadcast, jwt_key, writer_lock):
     def check_origin(request):
-        if request.headers.get('X-Sentinel-Request') != '1' or (request.headers.get('origin') and request.headers['origin'] != str(request.base_url).rstrip('/')):
+        if request.headers.get('X-Sentinel-Request') != '1' or not origin_allowed(request.headers.get('origin'), str(request.base_url)):
             raise HTTPException(403, 'Same-origin request required')
     attempts = {}
     import time, threading
@@ -97,7 +97,7 @@ def install_workspace(app, sessions, engine, permit, current_user, db_dependency
 
     @app.get('/api/auth/config')
     def auth_config():
-        return {'verification_required':require_verification(),'email_enabled':mail_ready(),'google_enabled':False,'microsoft_enabled':False, 'mfa_enabled':False,'access_minutes':15,'refresh_days':7}
+        return {'verification_required':require_verification(),'email_enabled':mail_ready(),'google_enabled':False,'microsoft_enabled':False, 'mfa_enabled':False,'local_demo':not production(),'access_minutes':15,'refresh_days':7}
 
     @app.post('/api/auth/refresh')
     def refresh(request:Request,response:Response,db=Depends(db_dependency)):

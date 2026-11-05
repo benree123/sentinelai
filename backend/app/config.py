@@ -11,6 +11,16 @@ def secure_cookies():
 def require_verification():
     return os.getenv('REQUIRE_EMAIL_VERIFICATION', 'true' if production() else 'false').lower() == 'true'
 
+def origin_allowed(origin, request_origin):
+    """Accept the request's own origin or the configured public URL.
+
+    A TLS-terminating host forwards plain HTTP, so the app can see http://host
+    while the browser correctly sends Origin: https://host.
+    """
+    if not origin:
+        return True
+    return origin in {request_origin.rstrip('/'), os.getenv('SENTINEL_PUBLIC_URL', '').rstrip('/')}
+
 def validate_configuration():
     if os.getenv('SENTINEL_ENV', 'development') not in ('development', 'production'):
         raise RuntimeError('SENTINEL_ENV must be development or production')
