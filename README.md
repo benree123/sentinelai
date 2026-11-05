@@ -99,7 +99,7 @@ Liveness: `/api/live-check`. Readiness/database query: `/api/health`. Authentica
 - Fifteen-minute HS256 JWT access cookies and seven-day absolute refresh sessions; transactional refresh rotation and server-side digests.
 - HttpOnly/SameSite Strict cookies. Logout, password reset, suspension, role changes and owner revocation invalidate sessions.
 - Same-origin custom headers plus exact Origin checks on writes; no cross-origin credential access. WebSockets validate sessions/origin and periodically revalidate.
-- Five login attempts per IP/minute and canonical-account failure limits; mutation throttling. Limits are process-local and need a shared store for multiple workers.
+- Five failed login attempts per IP/minute and canonical-account failure limits; mutation throttling. Limits are process-local and need a shared store for multiple workers.
 - Backend RBAC for every sensitive operation; new registrants cannot select privileged roles.
 - Fixed simulation enum and forbidden extra inputs: no arbitrary targets, commands, URLs or credentials.
 - Deterministic risk weights are signals for investigation, not compromise probabilities.
@@ -114,7 +114,7 @@ No successful LLM inference is claimed in this environment. Prompt grounding doe
 
 ## Validation and limitations
 
-See [engineering report](docs/ENGINEERING_REPORT.md) for exact commands/results and [initial audit](docs/AUDIT.md) for findings. The standard `npm run build` passed on GitHub�s Linux runner and inside the Docker build. A restricted Windows host still reports `spawn EPERM`; the successful CI build confirms the standard command works without an alternate bundler.
+See [engineering report](docs/ENGINEERING_REPORT.md) for exact commands/results and [initial audit](docs/AUDIT.md) for findings. The standard `npm run build` passed on GitHub's Linux runner and inside the Docker build. A restricted Windows host still reports `spawn EPERM`; the successful CI build confirms the standard command works without an alternate bundler.
 
 The GitHub Actions definition checks SQLite/PostgreSQL, frontend tests/build, dependency advisories and Docker. The complete workflow passed in private pre-release verification: 67 tests on SQLite, 67 on PostgreSQL, three frontend tests, standard Vite build, dependency audits and Docker/PostgreSQL runtime smoke. The badge above shows the current public repository workflow. See [release verification](docs/RELEASE_VERIFICATION.md). Docker remains unavailable on the original Windows host. Tests use fictional disposable accounts and a dedicated `sentinel_test` database when `TEST_DATABASE_URL` is set; the PostgreSQL test schema is dropped between cases.
 

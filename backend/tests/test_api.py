@@ -202,3 +202,22 @@ def test_cursor_pagination(client):
     first=client.get('/api/events?limit=2').json()
     second=client.get('/api/events?limit=2&before='+str(first['next_cursor'])).json()
     assert [e['id'] for e in first['items']]==[3,2] and [e['id'] for e in second['items']]==[1]
+
+def test_public_url_is_accepted_behind_tls_proxy(client,monkeypatch):
+    # The host terminates TLS, so the app sees http while the browser sends https.
+    monkeypatch.setenv('SENTINEL_PUBLIC_URL','https://demo.example/')
+    origin={**HEADERS,'Origin':'https://demo.example'}
+    assert client.post('/api/auth/login',json={'username':'admin','password':PASSWORD},headers=origin).status_code==200
+    assert client.post('/api/auth/refresh',headers=origin).status_code==200
+    assert client.post('/api/events',json=event(occurred_at=datetime.now(timezone.utc).isoformat()),headers=origin).status_code==201
+    with client.websocket_connect('/api/live',headers={'Origin':'https://demo.example'}) as socket:
+        assert socket.receive_json()['type']=='connected'
+    assert client.post('/api/events',json=event(2),headers={**HEADERS,'Origin':'http://demo.example'}).status_code==403
+
+def test_successful_logins_do_not_consume_the_address_limit(client):
+    for _ in range(6):
+        login(client,'viewer')
+
+def test_signed_out_admin_page_returns_the_app_shell(client):
+    assert client.get('/admin/users').status_code in (200,503)
+    assert client.get('/api/admin/users').status_code==401

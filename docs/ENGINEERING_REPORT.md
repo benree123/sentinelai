@@ -68,7 +68,7 @@ This points to dependency packages only; root pytest.ini supplies the backend ap
 | `python -m pytest tests -q` — backend, baseline before fixes | 57 passed; 2 warnings; 529.29 seconds |
 | `python -m pytest -q` — repository root, expanded suite | 63 passed; 2 warnings; 611.96 seconds |
 | `python -m pytest outputs/SentinelAI/backend/tests/test_workspace.py -k 'parallel_login_failures or account_lockout' -q` — host workspace, after final lockout change | 2 passed, 25 deselected; 2 warnings; 28.07 seconds. Includes the new 64th test and existing lockout regression. A single final 67-case local run is not claimed; the 63-case suite plus targeted lockout and model-bound regressions were executed. |
-| `python -m pytest backend/tests/test_analysis.py -q` � root after final model bounds | 3 passed; 1 cache warning; 0.85 seconds. Mocked model responses test oversized summary/hypothesis/action fallback; no real inference claimed. |
+| `python -m pytest backend/tests/test_analysis.py -q` — root after final model bounds | 3 passed; 1 cache warning; 0.85 seconds. Mocked model responses test oversized summary/hypothesis/action fallback; no real inference claimed. |
 | `python -m pytest --collect-only -q` — repository root before final extra test | 63 collected successfully |
 | `npm run typecheck` — frontend and root script | Passed strict TypeScript checking, including final UI changes |
 | `npm test` — frontend; `npm run test:frontend` — root | All 3 client session-refresh regressions passed |
