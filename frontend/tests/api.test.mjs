@@ -37,3 +37,18 @@ test('a revoked refresh session emits expiry and rejects the request',async()=>{
  globalThis.fetch=async(url)=>{if(url==='/api/auth/refresh')refreshCalls++;return response(401,{detail:'Session revoked'})};
  try{await assert.rejects(()=>api('/dashboard'),/Session revoked/);assert.equal(refreshCalls,1);assert.equal(expired,1)}finally{globalThis.fetch=originalFetch;window.removeEventListener('sentinel:expired',handler)}
 });
+
+test('a non-JSON proxy response shows a readable message',async()=>{
+ globalThis.fetch=async()=>new Response('<html>Bad gateway</html>',{status:502,headers:{'Content-Type':'text/html'}});
+ try{await assert.rejects(()=>api('/dashboard'),/waking up/)}finally{globalThis.fetch=originalFetch}
+});
+
+test('a network failure shows a readable message',async()=>{
+ globalThis.fetch=async()=>{throw new TypeError('Failed to fetch')};
+ try{await assert.rejects(()=>api('/dashboard'),/waking up/)}finally{globalThis.fetch=originalFetch}
+});
+
+test('validation errors show the server message',async()=>{
+ globalThis.fetch=async()=>response(422,{detail:[{msg:'Value error, Enter a valid email address'}]});
+ try{await assert.rejects(()=>api('/auth/forgot-password'),/^Error: Enter a valid email address$/)}finally{globalThis.fetch=originalFetch}
+});
