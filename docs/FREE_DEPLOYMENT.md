@@ -29,6 +29,7 @@ Set environment variables privately in Render:
 | `SENTINEL_ENV` | `production` |
 | `COOKIE_SECURE` | `true` |
 | `REQUIRE_EMAIL_VERIFICATION` | `false` for this email-free portfolio demo |
+| `SENTINEL_GUEST_DEMO` | `true` to show the one-click **Try the demo** button |
 | `DATABASE_URL` | Neon connection using `postgresql+psycopg://` |
 | `SENTINEL_JWT_KEY` | Random hexadecimal key, at least 64 characters |
 | `SENTINEL_BOOTSTRAP_PASSWORD` | Random private password, 12-128 characters |
@@ -41,7 +42,7 @@ First startup seeds admin, manager, analyst, and viewer with the bootstrap
 password. Keep it private: it grants administrator access. Do not publish it
 as a visitor login. Registration grants viewer access without proving email
 ownership. SMTP recovery/invitations and actual local-model inference are not
-configured by this deployment. Reviewer access can be arranged separately.
+configured by this deployment. The guest demo signs visitors into a shared, restricted analyst account with sample incidents. Guests can investigate, use the evidence assistant, export reports and run rate-limited simulations. They cannot write notes, manage sessions or open administrator pages. Enabling it also deletes simulated and sample incidents and events after two hours, whenever a guest signs in, so use it only on a demo database.
 
 ## Verify before sharing
 

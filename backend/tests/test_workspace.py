@@ -1,5 +1,6 @@
 """Security and workflow regression checks for the refurbished workspace."""
 import base64, json
+import pytest
 from datetime import timedelta
 from sqlalchemy import select
 from test_api import client, login, incident, HEADERS, PASSWORD
@@ -307,3 +308,78 @@ def test_parallel_login_failures_count_toward_account_lockout(client):
         assert list(executor.map(fail,range(5)))==[401]*5
     other=TestClient(client.app,client=('198.51.100.99',9999))
     assert other.post('/api/auth/login',json={'username':'admin','password':PASSWORD},headers=HEADERS).status_code==429
+
+
+@pytest.fixture
+def guest(client,monkeypatch):
+    monkeypatch.setenv('SENTINEL_GUEST_DEMO','true')
+    response=client.post('/api/auth/demo',headers=HEADERS)
+    assert response.status_code==200
+    assert response.json()['guest'] is True and response.json()['role']=='analyst'
+    return client
+
+def test_guest_demo_is_off_by_default(client):
+    assert client.get('/api/auth/config').json()['guest_demo'] is False
+    assert client.post('/api/auth/demo',headers=HEADERS).status_code==404
+
+def test_guest_demo_requires_same_origin(client,monkeypatch):
+    monkeypatch.setenv('SENTINEL_GUEST_DEMO','true')
+    assert client.post('/api/auth/demo').status_code==403
+    assert client.post('/api/auth/demo',headers={**HEADERS,'Origin':'https://evil.example'}).status_code==403
+
+def test_guest_sees_samples_and_can_use_the_workflow(guest):
+    items=guest.get('/api/incidents').json()['items']
+    assert {i['rule'] for i in items}>={'AUTH-001','IAM-002','API-007','DATA-010'}
+    takeover=next(i for i in items if i['rule']=='AUTH-001')
+    assert takeover['score']==95 and takeover['severity']=='critical'
+    assert guest.post(f"/api/incidents/{takeover['id']}/analysis",headers=HEADERS).status_code==200
+    change=guest.patch(f"/api/incidents/{takeover['id']}",json={'status':'investigating','version':takeover['version'],'assigned_to':'guest','reason':'Reviewing the evidence'},headers=HEADERS)
+    assert change.status_code==200
+    assert guest.post('/api/simulations',json={'scenario':'data_access'},headers=HEADERS).status_code==201
+
+def test_guest_restrictions_are_enforced(guest):
+    incident=guest.get('/api/incidents').json()['items'][0]['id']
+    assert guest.post(f'/api/incidents/{incident}/notes',json={'body':'Visible to everyone'},headers=HEADERS).status_code==403
+    assert guest.get('/api/admin/users').status_code==403
+    assert guest.get('/api/audit').status_code==403
+    assert guest.get('/admin/users').status_code==403
+    assert len(guest.get('/api/auth/sessions').json()['items'])==1
+    assert guest.delete('/api/auth/sessions/anything',headers=HEADERS).status_code==403
+    assert [a['username'] for a in guest.get('/api/analysts').json()['items']]==['guest']
+
+def test_guests_cannot_see_each_others_sessions(guest):
+    from fastapi.testclient import TestClient
+    other=TestClient(guest.app)
+    assert other.post('/api/auth/demo',headers=HEADERS).status_code==200
+    sessions=other.get('/api/auth/sessions').json()['items']
+    assert len(sessions)==1 and sessions[0]['current'] is True
+
+def test_guest_password_login_is_not_available(guest):
+    assert guest.post('/api/auth/login',json={'username':'guest','password':PASSWORD},headers=HEADERS).status_code==401
+
+def test_samples_do_not_duplicate_and_are_restored(guest):
+    count=len(guest.get('/api/incidents').json()['items'])
+    assert guest.post('/api/auth/demo',headers=HEADERS).status_code==200
+    assert len(guest.get('/api/incidents').json()['items'])==count
+    privilege=next(i for i in guest.get('/api/incidents').json()['items'] if i['rule']=='IAM-002')
+    assert guest.patch(f"/api/incidents/{privilege['id']}",json={'status':'dismissed','version':privilege['version'],'assigned_to':'guest','reason':'Sample was reviewed'},headers=HEADERS).status_code==200
+    assert guest.post('/api/auth/demo',headers=HEADERS).status_code==200
+    active=[i for i in guest.get('/api/incidents').json()['items'] if i['rule']=='IAM-002' and i['status']=='open']
+    assert len(active)==1
+
+def test_old_demo_data_expires_but_real_incidents_remain(guest):
+    from datetime import timedelta
+    from app.models import Incident,Event,utcnow
+    old=utcnow()-timedelta(hours=3)
+    with guest.app.state.sessions.begin() as db:
+        real=Incident(correlation_key='AUTH-001:real:203.0.113.10:api',rule='AUTH-001',title='Real',severity='high',score=70,explanation='Kept',created_at=old)
+        db.add(real);db.flush();real_id=real.id
+        sample_ids=[i.id for i in db.scalars(select(Incident).where(Incident.correlation_key.contains(':sample-')))]
+        for incident in db.scalars(select(Incident).where(Incident.correlation_key.contains(':sample-'))):
+            incident.created_at=old
+        for item in db.scalars(select(Event).where(Event.external_id.startswith('demo-'))):
+            item.occurred_at=old
+    assert guest.post('/api/auth/demo',headers=HEADERS).status_code==200
+    ids={i['id'] for i in guest.get('/api/incidents').json()['items']}
+    assert real_id in ids and not ids&set(sample_ids)
+    assert {'AUTH-001','IAM-002'}<={i['rule'] for i in guest.get('/api/incidents').json()['items']}

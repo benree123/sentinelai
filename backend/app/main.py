@@ -8,11 +8,11 @@ from uuid import uuid4
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, IPvAnyAddress, ConfigDict
-from sqlalchemy import create_engine, select, func, update, text, event as sa_event
+from sqlalchemy import create_engine, delete, or_, select, func, update, text, event as sa_event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from .models import Base, User, SessionToken, Event, Incident, Evidence, Note, Audit, UserProfile, AccountToken, utcnow
+from .models import Base, User, SessionToken, Event, Incident, Evidence, Note, Audit, UserProfile, AccountToken, IncidentReport, utcnow
 from .security import hash_password, verify_password, token_hash, jwt_encode, jwt_decode
 from .detection import detect, RULES
 from .analysis import analyze
@@ -21,6 +21,15 @@ from .config import validate_configuration, secure_cookies, origin_allowed, prod
 
 log = logging.getLogger('sentinel')
 COOKIE = 'sentinel_session'
+GUEST_USERNAME = 'guest'
+DEMO_RETENTION = timedelta(hours=2)
+# (name, rule whose active incident shows the sample exists, ordered event kinds)
+SAMPLE_INCIDENTS = [
+    ('takeover', 'AUTH-001', ['login_failed']*8+['unknown_device', 'login_success', 'unauthorized_access']),
+    ('privilege', 'IAM-002', ['privilege_changed']),
+    ('api', 'API-007', ['api_rate_limit']*4),
+    ('export', 'DATA-010', ['large_data_request']),
+]
 
 class LoginInput(BaseModel):
     username: str = Field(min_length=1, max_length=80)
@@ -106,6 +115,8 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
     account_failures = {}
     rate_lock = threading.Lock()
     mutation_attempts = {}
+    guest_simulations = []
+    demo_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -173,7 +184,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             profile = db.get(UserProfile, user.id) if user else None
             if not user or (profile and (profile.state != 'active' or not profile.verified)):
                 return None
-            return {'id': user.id, 'username': user.username, 'role': user.role, 'email': profile.email if profile else '', 'display_name': profile.display_name if profile else user.username}
+            return {'id': user.id, 'username': user.username, 'role': user.role, 'email': profile.email if profile else '', 'display_name': profile.display_name if profile else user.username, 'guest': user.username == GUEST_USERNAME}
 
     def current_user(request: Request):
         user = session_user(request.cookies.get(COOKIE))
@@ -236,6 +247,40 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             db.commit()
             log.info(json.dumps({'action': 'event.ingested', 'event_id': record.id, 'incident_id': incident.id if incident else None}))
             return {'event': event_json(record), 'incident_id': incident.id if incident else None, 'duplicate': False}
+
+    def prepare_guest_demo():
+        """Create the guest account, expire old demo data and restore missing samples."""
+        with demo_lock:
+            cutoff = utcnow()-DEMO_RETENTION
+            with sessions.begin() as db:
+                writer_lock(db)
+                guest = db.scalar(select(User).where(User.username==GUEST_USERNAME))
+                if not guest:
+                    guest = User(username=GUEST_USERNAME, role='analyst', password_hash=hash_password(secrets.token_urlsafe(32)))
+                    db.add(guest)
+                    db.flush()
+                    db.add(UserProfile(user_id=guest.id, email='guest@sentinel.local', display_name='Demo Analyst', verified=True))
+                guest_id = guest.id
+                expired = list(db.scalars(select(Incident.id).where(Incident.created_at<cutoff, or_(
+                    Incident.correlation_key.contains(':demo-user-'), Incident.correlation_key.contains(':sample-')))))
+                if expired:
+                    for model in (Evidence, Note, IncidentReport):
+                        db.execute(delete(model).where(model.incident_id.in_(expired)))
+                    db.execute(delete(Incident).where(Incident.id.in_(expired)))
+                db.execute(delete(Event).where(Event.external_id.startswith('demo-'), Event.occurred_at<cutoff, Event.id.not_in(select(Evidence.event_id))))
+                db.execute(delete(Audit).where(Audit.actor==GUEST_USERNAME, Audit.created_at<cutoff))
+                db.execute(delete(SessionToken).where(SessionToken.user_id==guest_id, SessionToken.expires_at<=utcnow()))
+                active = list(db.scalars(select(Incident.correlation_key).where(Incident.status.not_in(['resolved', 'dismissed']))))
+            for name, rule, kinds in SAMPLE_INCIDENTS:
+                if any(key.startswith(f'{rule}:sample-{name}-') for key in active):
+                    continue
+                run = uuid4().hex[:8]
+                now = datetime.now(timezone.utc)
+                for number, kind in enumerate(kinds):
+                    process_event(EventInput(external_id=f'demo-sample-{run}-{number}', kind=kind, service='customer-api',
+                        actor=f'sample-{name}-{run}', source_ip='203.0.113.42', message=f'Fictional sample {name} scenario: {kind.replace("_"," ")}',
+                        occurred_at=now-timedelta(seconds=(len(kinds)-number)*15)), GUEST_USERNAME)
+            return guest_id
 
     @app.get('/api/live-check')
     def live_check():
@@ -378,6 +423,8 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
     async def add_note(incident_id: int, payload: NoteInput, user=Depends(permit('admin','manager','analyst')), db=Depends(db_dependency)):
         if not db.get(Incident, incident_id):
             raise HTTPException(404, 'Incident not found')
+        if user['guest']:
+            raise HTTPException(403, 'Notes are turned off in the shared demo')
         db.add(Note(incident_id=incident_id, author=user['username'], body=payload.body))
         db.add(Audit(actor=user['username'], action='incident.note_added', target=f'incident:{incident_id}', detail='Analyst note added'))
         db.commit()
@@ -418,6 +465,13 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
 
     @app.post('/api/simulations', status_code=201)
     async def simulate(payload: SimulationInput, user=Depends(permit('admin','manager','analyst'))):
+        if user['guest']:
+            with rate_lock:
+                now = time.monotonic()
+                guest_simulations[:] = [t for t in guest_simulations if now-t < 60]
+                if len(guest_simulations) >= 10:
+                    raise HTTPException(429, 'The demo is busy; try another simulation in a minute')
+                guest_simulations.append(now)
         kinds = {'suspicious_ip': ('suspicious_ip',1), 'password_reset': ('password_reset',1), 'large_data_request': ('large_data_request',1), 'unauthorized_access': ('unauthorized_access',1), 'account_takeover': ('login_failed',8), 'unknown_device': ('unknown_device',1),
             'api_abuse': ('api_rate_limit',4), 'geographic_anomaly': ('unusual_geo',1), 'account_lockout': ('account_lockout',1), 'credential_attack': ('login_failed',6), 'privilege_change': ('privilege_changed',1),
             'data_access': ('suspicious_access',1), 'service_errors': ('service_error',4), 'normal_activity': ('login_success',3)}
@@ -476,7 +530,7 @@ def create_app(database_url=None, seed=True, frontend_dir=None):
             sockets.pop(socket,None)
 
     from .workspace import install_workspace
-    install_workspace(app, sessions, engine, permit, current_user, db_dependency, broadcast, jwt_key, writer_lock)
+    install_workspace(app, sessions, engine, permit, current_user, db_dependency, broadcast, jwt_key, writer_lock, prepare_guest_demo, session_user)
 
     frontend = Path(frontend_dir or Path(__file__).resolve().parents[2]/'frontend/dist')
     from fastapi.responses import FileResponse

@@ -1,5 +1,5 @@
 """Account lifecycle and analyst workspace endpoints."""
-import os, secrets, smtplib, ssl
+import asyncio, os, secrets, smtplib, ssl
 from datetime import timedelta
 from email.message import EmailMessage
 from urllib.parse import urlencode, urlparse
@@ -11,7 +11,7 @@ from .models import User, UserProfile, SessionToken, AccountToken, Incident, Eve
 from .security import hash_password, token_hash, jwt_encode, jwt_decode
 from .analysis import analyze
 from typing import Literal
-from .config import secure_cookies, require_verification, origin_allowed, production
+from .config import secure_cookies, require_verification, origin_allowed, production, guest_demo_enabled
 
 class EmailInput(BaseModel):
     email: str = Field(min_length=5, max_length=254)
@@ -70,11 +70,12 @@ def send_account_mail(email, token, purpose):
         raise HTTPException(503, 'Email delivery failed. Try again later.')
 
 
-def install_workspace(app, sessions, engine, permit, current_user, db_dependency, broadcast, jwt_key, writer_lock):
+def install_workspace(app, sessions, engine, permit, current_user, db_dependency, broadcast, jwt_key, writer_lock, prepare_guest_demo, session_user):
     def check_origin(request):
         if request.headers.get('X-Sentinel-Request') != '1' or not origin_allowed(request.headers.get('origin'), str(request.base_url)):
             raise HTTPException(403, 'Same-origin request required')
     attempts = {}
+    demo_attempts = []
     import time, threading
     limit_lock = threading.Lock()
     def public_limit(request):
@@ -97,7 +98,30 @@ def install_workspace(app, sessions, engine, permit, current_user, db_dependency
 
     @app.get('/api/auth/config')
     def auth_config():
-        return {'verification_required':require_verification(),'email_enabled':mail_ready(),'google_enabled':False,'microsoft_enabled':False, 'mfa_enabled':False,'local_demo':not production(),'access_minutes':15,'refresh_days':7}
+        return {'verification_required':require_verification(),'email_enabled':mail_ready(),'google_enabled':False,'microsoft_enabled':False, 'mfa_enabled':False,'local_demo':not production(),'guest_demo':guest_demo_enabled(),'access_minutes':15,'refresh_days':7}
+
+    @app.post('/api/auth/demo')
+    async def demo_login(request:Request,response:Response,db=Depends(db_dependency)):
+        if not guest_demo_enabled():
+            raise HTTPException(404,'The guest demo is not enabled')
+        check_origin(request)
+        with limit_lock:
+            now=time.monotonic()
+            demo_attempts[:]=[t for t in demo_attempts if now-t<60]
+            if len(demo_attempts)>=30:
+                raise HTTPException(429,'The demo is busy; try again in a minute')
+            demo_attempts.append(now)
+        guest_id=await asyncio.to_thread(prepare_guest_demo)
+        raw=secrets.token_urlsafe(32)
+        deadline=utcnow()+timedelta(hours=2)
+        db.add(SessionToken(token_hash=token_hash(raw),user_id=guest_id,expires_at=deadline))
+        db.add(Audit(actor='guest',action='auth.demo_login',target='session',detail='Guest demo session created'))
+        db.commit()
+        access=jwt_encode(raw,jwt_key)
+        response.set_cookie('sentinel_session',access,httponly=True,secure=secure_cookies(),samesite='strict',max_age=900)
+        response.set_cookie('sentinel_refresh',raw,httponly=True,secure=secure_cookies(),samesite='strict',path='/api/auth',max_age=7200)
+        await broadcast('events.changed')
+        return session_user(access)
 
     @app.post('/api/auth/refresh')
     def refresh(request:Request,response:Response,db=Depends(db_dependency)):
@@ -121,11 +145,15 @@ def install_workspace(app, sessions, engine, permit, current_user, db_dependency
     @app.get('/api/auth/sessions')
     def user_sessions(request:Request,user=Depends(current_user),db=Depends(db_dependency)):
         current=jwt_decode(request.cookies.get('sentinel_session',''),jwt_key)
-        rows=db.scalars(select(SessionToken).where(SessionToken.user_id==user['id'],SessionToken.expires_at>utcnow()))
+        rows=list(db.scalars(select(SessionToken).where(SessionToken.user_id==user['id'],SessionToken.expires_at>utcnow())))
+        if user['guest']:
+            rows=[s for s in rows if s.token_hash==token_hash(current)]
         return {'items':[{'id':s.token_hash,'expires_at':s.expires_at.isoformat()+'Z','current':s.token_hash==token_hash(current)} for s in rows]}
 
     @app.delete('/api/auth/sessions/{session_id}')
     async def revoke_session(session_id:str,user=Depends(permit('admin','manager','analyst','viewer')),db=Depends(db_dependency)):
+        if user['guest']:
+            raise HTTPException(403,'Session management is turned off in the shared demo')
         row=db.get(SessionToken,session_id)
         if not row or row.user_id!=user['id']:
             raise HTTPException(404,'Session not found')
@@ -202,6 +230,8 @@ def install_workspace(app, sessions, engine, permit, current_user, db_dependency
 
     @app.get('/api/analysts')
     def analysts(user=Depends(current_user),db=Depends(db_dependency)):
+        if user['guest']:
+            return {'items':[{'username':user['username'],'display_name':user['display_name']}]}
         return {'items':[{'username':u.username,'display_name':p.display_name} for u,p in db.execute(select(User,UserProfile).join(UserProfile).where(User.role.in_(['admin','manager','analyst']),UserProfile.state=='active',UserProfile.verified==True))]}
 
     @app.patch('/api/admin/users/{user_id}')

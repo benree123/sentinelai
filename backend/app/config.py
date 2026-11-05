@@ -21,10 +21,13 @@ def origin_allowed(origin, request_origin):
         return True
     return origin in {request_origin.rstrip('/'), os.getenv('SENTINEL_PUBLIC_URL', '').rstrip('/')}
 
+def guest_demo_enabled():
+    return os.getenv('SENTINEL_GUEST_DEMO', 'false').lower() == 'true'
+
 def validate_configuration():
     if os.getenv('SENTINEL_ENV', 'development') not in ('development', 'production'):
         raise RuntimeError('SENTINEL_ENV must be development or production')
-    for name in ('COOKIE_SECURE', 'REQUIRE_EMAIL_VERIFICATION'):
+    for name in ('COOKIE_SECURE', 'REQUIRE_EMAIL_VERIFICATION', 'SENTINEL_GUEST_DEMO'):
         if os.getenv(name, '').lower() not in ('', 'true', 'false'):
             raise RuntimeError(name + ' must be true or false')
     if production():
